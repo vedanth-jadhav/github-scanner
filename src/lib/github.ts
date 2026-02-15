@@ -233,12 +233,11 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
 }
 
 // Extract new repos from GH Archive events - dedupe on the fly
-export function extractReposFromEvents(events: GHArchiveEvent[], maxRepos = 200): Array<{ owner: string; repo: string }> {
+export function extractReposFromEvents(events: GHArchiveEvent[]): Array<{ owner: string; repo: string }> {
   const seen = new Set<string>()
   const result: Array<{ owner: string; repo: string }> = []
   
   for (const event of events) {
-    if (result.length >= maxRepos) break
     if (event.repo?.name && !seen.has(event.repo.name)) {
       seen.add(event.repo.name)
       const [owner, repo] = event.repo.name.split('/')

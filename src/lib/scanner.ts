@@ -315,14 +315,11 @@ export async function startDiscovery() {
         console.log(`Fetching GH Archive for ${hourStr}`)
         
         const events = await fetchGHArchiveEvents(lastProcessedHour)
-        const repos = extractReposFromEvents(events, 200)
+        const repos = extractReposFromEvents(events)
         
         console.log(`Found ${repos.length} repos from ${events.length} events`)
         
-        const slotsAvailable = MAX_QUEUE_SIZE - scanQueue.length
-        const reposToAdd = repos.slice(0, Math.min(slotsAvailable, 200))
-        
-        for (const { owner, repo } of reposToAdd) {
+        for (const { owner, repo } of repos) {
           await addToQueue(owner, repo)
         }
         
