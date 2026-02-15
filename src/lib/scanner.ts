@@ -192,10 +192,12 @@ function emit(event: string, data: unknown) {
 // Queue
 const scanQueue: Array<{ owner: string; repo: string }> = []
 const inProgress = new Set<string>()
+const MAX_QUEUE_SIZE = 1000
 
 export async function addToQueue(owner: string, repo: string): Promise<boolean> {
   const key = `${owner}/${repo}`
   
+  if (scanQueue.length >= MAX_QUEUE_SIZE) return false
   if (inProgress.has(key)) return false
   if (await isAlreadyScanned(owner, repo)) return false
   
@@ -304,15 +306,23 @@ export async function startDiscovery() {
   const discover = async () => {
     while (discoveryRunning && scannerRunning) {
       try {
+        if (scanQueue.length >= MAX_QUEUE_SIZE) {
+          await new Promise(r => setTimeout(r, 10000))
+          continue
+        }
+        
         const hourStr = lastProcessedHour.toISOString().slice(0, 13) + ':00:00.000Z'
         console.log(`Fetching GH Archive for ${hourStr}`)
         
         const events = await fetchGHArchiveEvents(lastProcessedHour)
-        const repos = extractReposFromEvents(events)
+        const repos = extractReposFromEvents(events, 200)
         
         console.log(`Found ${repos.length} repos from ${events.length} events`)
         
-        for (const { owner, repo } of repos) {
+        const slotsAvailable = MAX_QUEUE_SIZE - scanQueue.length
+        const reposToAdd = repos.slice(0, Math.min(slotsAvailable, 200))
+        
+        for (const { owner, repo } of reposToAdd) {
           await addToQueue(owner, repo)
         }
         
