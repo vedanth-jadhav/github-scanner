@@ -5,4 +5,4 @@ nixpkgs = ["nodejs_20", "npm-9_x", "openssl"]
 cmd = "prisma generate && next build"
 
 [start]
-cmd = "npx prisma db push --skip-generate && next start"
+cmd = "next start"

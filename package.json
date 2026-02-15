@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
-    "start": "npx prisma db push --skip-generate && next start",
+    "start": "next start",
     "lint": "next lint",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
@@ -22,7 +22,7 @@
     "@tanstack/react-virtual": "3.5.0",
     "date-fns": "3.6.0",
     "modern-ahocorasick": "2.0.4",
-    "next": "^14.2.35",
+    "next": "14.2.35",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "zustand": "4.5.2"

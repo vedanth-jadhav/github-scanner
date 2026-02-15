@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { tokenPool } from '@/lib/github'
-import { db } from '@/lib/db'
+import { db, ensureTables } from '@/lib/db'
 
 export async function GET() {
+  await ensureTables()
   const tokens = await db.token.findMany({
     select: {
       id: true,
@@ -10,7 +11,6 @@ export async function GET() {
       active: true,
       usage: true,
       createdAt: true,
-      // Don't expose the actual token
     },
   })
   
@@ -18,6 +18,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  await ensureTables()
   const { token, name } = await request.json()
   
   if (!token) {
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  await ensureTables()
   const { id } = await request.json()
   
   await db.token.update({

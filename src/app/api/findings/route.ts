@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, ensureTables } from '@/lib/db'
 
 export async function GET(request: NextRequest) {
+  await ensureTables()
   const { searchParams } = new URL(request.url)
   const provider = searchParams.get('provider')
   const limit = parseInt(searchParams.get('limit') || '100')
@@ -30,6 +31,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  await ensureTables()
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')
   

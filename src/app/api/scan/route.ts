@@ -8,8 +8,10 @@ import {
   addToQueue 
 } from '@/lib/scanner'
 import { tokenPool } from '@/lib/github'
+import { ensureTables } from '@/lib/db'
 
 export async function GET() {
+  await ensureTables()
   const state = getState()
   const tokenStatus = await tokenPool.getStatus()
   
@@ -20,6 +22,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  await ensureTables()
   const body = await request.json().catch(() => ({}))
   const action = body.action
   
