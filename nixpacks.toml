@@ -1,0 +1,7 @@
+[phases.setup]
+
+[phases.build]
+cmd = "prisma generate && next build"
+
+[start]
+cmd = "npx prisma db push --accept-data-loss && next start"

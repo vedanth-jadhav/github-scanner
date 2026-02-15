@@ -7,19 +7,24 @@ const globalForPrisma = globalThis as unknown as {
 }
 
 function getPrismaClient() {
+  const tursoUrl = process.env.TURSO_DATABASE_URL
+  const tursoToken = process.env.TURSO_AUTH_TOKEN
   const dbUrl = process.env.DATABASE_URL
   
-  if (!dbUrl) {
-    console.log('No DATABASE_URL, using local SQLite')
-    return new PrismaClient({
-      datasources: { db: { url: 'file:./prisma/dev.db' } }
+  if (tursoUrl) {
+    console.log('Using Turso:', tursoUrl)
+    const libsql = createClient({
+      url: tursoUrl,
+      authToken: tursoToken,
     })
+    const adapter = new PrismaLibSQL(libsql)
+    return new PrismaClient({ adapter })
   }
   
-  if (dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://')) {
-    console.log('Using PostgreSQL')
+  if (!dbUrl) {
+    console.log('Using local SQLite')
     return new PrismaClient({
-      datasources: { db: { url: dbUrl } }
+      datasources: { db: { url: 'file:./prisma/dev.db' } }
     })
   }
   
@@ -30,17 +35,9 @@ function getPrismaClient() {
     })
   }
   
-  if (dbUrl.startsWith('libsql://') || dbUrl.startsWith('http')) {
-    console.log('Using Turso/libsql:', dbUrl)
-    const libsql = createClient({
-      url: dbUrl,
-      authToken: process.env.TURSO_AUTH_TOKEN,
-    })
-    const adapter = new PrismaLibSQL(libsql)
-    return new PrismaClient({ adapter })
-  }
-  
-  return new PrismaClient({ datasources: { db: { url: dbUrl } } })
+  return new PrismaClient({
+    datasources: { db: { url: dbUrl } }
+  })
 }
 
 export const db = globalForPrisma.prisma ?? getPrismaClient()
