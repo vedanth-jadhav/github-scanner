@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+model Finding {
+  id          String   @id @default(cuid())
+  provider    String
+  keyMasked   String
+  keyHash     String   @unique
+  repoOwner   String
+  repoName    String
+  filePath    String
+  line        Int?
+  githubUrl   String
+  foundAt     DateTime @default(now())
+  disclosed   Boolean  @default(false)
+  disclosedAt DateTime?
+}
+
+model ScannedRepo {
+  id        String   @id @default(cuid())
+  owner     String
+  name      String
+  fullName  String   @unique
+  scannedAt DateTime @default(now())
+  findings  Int      @default(0)
+}
+
+model Token {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  name      String?
+  active    Boolean  @default(true)
+  usedAt    DateTime?
+  usage     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model ScanLog {
+  id          String   @id @default(cuid())
+  repoOwner   String
+  repoName    String
+  status      String
+  findings    Int      @default(0)
+  duration    Int?
+  error       String?
+  scannedAt   DateTime @default(now())
+}
