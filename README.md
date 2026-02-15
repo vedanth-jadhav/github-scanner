@@ -2,60 +2,86 @@
 
 A security research tool that scans public GitHub repositories for exposed API keys.
 
-## Features
+## Deploy to Vercel (Free, 5 minutes)
 
-- **Multi-provider detection**: OpenAI, Anthropic, Gemini, Groq, Cerebras, OpenRouter, Grok
-- **High-speed scanning**: 8 parallel workers, 10+ repos/minute
-- **Smart filtering**: Aho-Corasick preflight, entropy validation, banlist filtering
-- **Persistent tracking**: Never scans the same repo twice
-- **Disclosure helper**: Generate issue templates to notify repo owners
-- **Dark brutalist UI**: Data-first design, no bloat
+### Step 1: Create Turso Database (Free)
 
-## Deploy to Vercel (Free)
+1. Go to **https://turso.tech** → Sign in with GitHub
+2. Click **Create Database**
+3. Name it `github-scanner`
+4. Copy the **Database URL** (looks like `libsql://github-scanner-xxx.turso.io`)
+5. Go to **Settings** → **API Tokens** → Create token
+6. Copy the **Auth Token**
 
-### Step 1: Fork this repo
+### Step 2: Deploy to Vercel
 
-### Step 2: Create Vercel Postgres Database
-
-1. Go to [vercel.com/new](https://vercel.com/new)
-2. Import your forked repo
-3. Go to **Storage** → **Create Database** → **Postgres**
-4. Copy the `DATABASE_URL` and `DIRECT_DATABASE_URL`
-
-### Step 3: Add Environment Variables
-
-In Vercel dashboard → Settings → Environment Variables:
+1. Go to **https://vercel.com/new**
+2. Import `vedanth-jadhav/github-scanner`
+3. Add Environment Variables:
 
 | Name | Value |
 |------|-------|
-| `GITHUB_TOKENS` | `ghp_your_token_here` (comma-separated for multiple) |
-| `DATABASE_URL` | (auto-added by Vercel Postgres) |
-| `DIRECT_DATABASE_URL` | (auto-added by Vercel Postgres) |
+| `TURSO_DATABASE_URL` | `libsql://your-db.turso.io` |
+| `TURSO_AUTH_TOKEN` | `eyJhbGciOiJ...` |
+| `GITHUB_TOKENS` | `ghp_your_token_here` |
 
-### Step 4: Deploy
+4. Click **Deploy**
 
-Click **Deploy**. Vercel will:
-1. Run `prisma generate`
-2. Build the Next.js app
-3. Deploy to edge
+### Step 3: Initialize Database
 
-### Step 5: Initialize Database
+After deployment, create tables in Turso:
 
-After deployment, run migrations:
+1. Go to Turso Dashboard → your database → **SQL Console**
+2. Run this SQL:
 
-```bash
-# Install Vercel CLI
-npm i -g vercel
+```sql
+CREATE TABLE "Finding" (
+  "id" TEXT PRIMARY KEY,
+  "provider" TEXT NOT NULL,
+  "keyMasked" TEXT NOT NULL,
+  "keyHash" TEXT UNIQUE NOT NULL,
+  "repoOwner" TEXT NOT NULL,
+  "repoName" TEXT NOT NULL,
+  "filePath" TEXT NOT NULL,
+  "line" INTEGER,
+  "githubUrl" TEXT NOT NULL,
+  "foundAt" DATETIME DEFAULT CURRENT_TIMESTAMP,
+  "disclosed" INTEGER DEFAULT 0,
+  "disclosedAt" DATETIME
+);
 
-# Link project
-vercel link
+CREATE TABLE "ScannedRepo" (
+  "id" TEXT PRIMARY KEY,
+  "owner" TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  "fullName" TEXT UNIQUE NOT NULL,
+  "scannedAt" DATETIME DEFAULT CURRENT_TIMESTAMP,
+  "findings" INTEGER DEFAULT 0
+);
 
-# Run migrations
-vercel env pull .env
-npx prisma db push
+CREATE TABLE "Token" (
+  "id" TEXT PRIMARY KEY,
+  "token" TEXT UNIQUE NOT NULL,
+  "name" TEXT,
+  "active" INTEGER DEFAULT 1,
+  "usedAt" DATETIME,
+  "usage" INTEGER DEFAULT 0,
+  "createdAt" DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE "ScanLog" (
+  "id" TEXT PRIMARY KEY,
+  "repoOwner" TEXT NOT NULL,
+  "repoName" TEXT NOT NULL,
+  "status" TEXT NOT NULL,
+  "findings" INTEGER DEFAULT 0,
+  "duration" INTEGER,
+  "error" TEXT,
+  "scannedAt" DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
-Or use Vercel's **Prisma integration** to auto-migrate.
+**Done!** Your scanner is live.
 
 ## Local Development
 
@@ -66,43 +92,31 @@ npm install
 # Generate Prisma client
 npx prisma generate
 
-# Create local SQLite database
-npx prisma db push
-
-# Start dev server
+# Start dev server (uses local SQLite)
 npm run dev
 ```
 
-## Rate Limits
+## Features
 
-| Auth | Requests/Hour |
-|------|---------------|
-| No token | 60 |
-| 1 GitHub PAT | 5,000 |
-| 5 GitHub PATs | 25,000 |
+- **Multi-provider detection**: OpenAI, Anthropic, Gemini, Groq, Cerebras, OpenRouter, Grok
+- **High-speed scanning**: 8 parallel workers, 10+ repos/minute  
+- **Smart filtering**: Aho-Corasick preflight, entropy validation, banlist
+- **Persistent tracking**: Never scans the same repo twice
+- **Disclosure helper**: Generate GitHub issue templates
+- **Dark brutalist UI**: Data-first, no bloat
 
-Add multiple tokens in Settings for faster scanning.
+## Free Tier Limits
+
+| Service | Free Limit |
+|---------|------------|
+| **Vercel** | 100GB bandwidth, 6000 min/month |
+| **Turso** | 9GB storage, unlimited reads |
+| **GitHub API** | 5,000 req/hr per token |
 
 ## How It Works
 
-1. **Discovery**: Polls GitHub Events API for new public repos
-2. **Queue**: Adds repos to queue (skips already scanned)
-3. **Scanning**: 8 parallel workers scan files via GitHub API
-4. **Detection**: Aho-Corasick keyword match → regex validation → entropy check
-5. **Storage**: Findings saved to Postgres with masked keys
-6. **Disclosure**: One-click to generate GitHub issue template
-
-## Responsible Disclosure
-
-When you find an exposed key:
-1. Click **Disclose** on the finding
-2. Review the pre-filled issue template
-3. Click **Open New Issue** to notify the repo owner
-4. Owner can rotate the key and remove from git history
-
-## Tech Stack
-
-- **Frontend**: Next.js 14, React, Tailwind CSS
-- **Backend**: Next.js API Routes, Server-Sent Events
-- **Database**: Vercel Postgres (Prisma ORM)
-- **Detection**: Aho-Corasick algorithm, Shannon entropy
+1. Polls GitHub Events API for new public repos
+2. Scans files via GitHub Contents API
+3. Detects keys with Aho-Corasick + regex + entropy
+4. Stores masked findings in Turso
+5. One-click disclosure via GitHub issues
