@@ -21,6 +21,7 @@ export interface ScannerStatus {
   reposPerMinute: number
   queueSize: number
   totalFound: number
+  totalScanned: number
   currentRepo: string | null
   scanningRepos?: string[]
 }
