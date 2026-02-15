@@ -7,6 +7,8 @@ const globalForPrisma = globalThis as unknown as {
 }
 
 let initPromise: Promise<void> | null = null
+let tablesReady = false
+let autoStartDone = false
 
 async function ensureTables() {
   if (initPromise) return initPromise
@@ -78,9 +80,26 @@ async function ensureTables() {
     `)
     
     console.log('Tables ready')
+    tablesReady = true
+    
+    if (!autoStartDone) {
+      autoStartDone = true
+      autoStart()
+    }
   })()
   
   return initPromise
+}
+
+async function autoStart() {
+  console.log('Auto-starting scanner...')
+  const { startScanner, startDiscovery } = await import('./scanner')
+  const { tokenPool } = await import('./github')
+  
+  await tokenPool.initialize()
+  startScanner()
+  startDiscovery()
+  console.log('Scanner auto-started')
 }
 
 function getPrismaClient() {
@@ -117,3 +136,9 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 export { ensureTables }
+
+export async function isTablesReady(): Promise<boolean> {
+  if (tablesReady) return true
+  await ensureTables()
+  return tablesReady
+}

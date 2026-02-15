@@ -34,8 +34,8 @@ async function markScanned(owner: string, repo: string, findings: number): Promi
 async function getFilesParallel(
   owner: string, 
   repo: string,
-  maxFiles: number = 30,
-  concurrency: number = 10
+  maxFiles: number = 50,
+  concurrency: number = 20
 ): Promise<Array<{ path: string; content: string }>> {
   const allFiles: Array<{ path: string; url: string }> = []
   const queue: string[] = ['']
@@ -43,6 +43,13 @@ async function getFilesParallel(
   while (queue.length > 0 && allFiles.length < maxFiles) {
     const path = queue.shift()!
     const result = await getRepoContents(owner, repo, path)
+    
+    if (result.error) {
+      if (result.rateLimited) {
+        console.log(`Rate limited, skipping ${owner}/${repo}`)
+      }
+      continue
+    }
     if (!result.data) continue
     
     for (const item of result.data) {
@@ -84,6 +91,8 @@ export async function scanRepo(owner: string, repoName: string): Promise<ScanRes
   const findings: Detection[] = []
   let filesScanned = 0
   
+  const fullName = `${owner}/${repoName}`
+  
   try {
     if (await isAlreadyScanned(owner, repoName)) {
       return {
@@ -96,7 +105,21 @@ export async function scanRepo(owner: string, repoName: string): Promise<ScanRes
       }
     }
     
-    const files = await getFilesParallel(owner, repoName)
+    const files = await getFilesParallel(owner, repoName, 50, 20)
+    
+    if (files.length === 0) {
+      await markScanned(owner, repoName, 0)
+      return {
+        owner,
+        repo: repoName,
+        findings: [],
+        duration: Date.now() - startTime,
+        filesScanned: 0,
+        error: 'No scannable files',
+      }
+    }
+    
+    console.log(`Scanning ${fullName}: ${files.length} files`)
     
     const allDetections = await Promise.all(
       files.map(async (file) => {
@@ -162,6 +185,7 @@ export interface ScannerState {
   reposPerMinute: number
   queueSize: number
   totalFound: number
+  totalScanned: number
   currentRepo: string | null
   scanningRepos: string[]
 }
@@ -171,6 +195,7 @@ const state: ScannerState = {
   reposPerMinute: 0,
   queueSize: 0,
   totalFound: 0,
+  totalScanned: 0,
   currentRepo: null,
   scanningRepos: [],
 }
@@ -213,7 +238,7 @@ export function getState(): ScannerState {
 
 // PARALLEL SCANNER
 let scannerRunning = false
-const CONCURRENT_SCANS = 8
+const CONCURRENT_SCANS = 16
 
 export async function startScanner() {
   if (scannerRunning) return
@@ -227,9 +252,11 @@ export async function startScanner() {
   let lastMinuteReset = Date.now()
   
   const scanWorker = async (workerId: number) => {
+    console.log(`Worker ${workerId} started`)
     while (scannerRunning) {
       const elapsed = Date.now() - lastMinuteReset
-      if (completedThisMinute >= 250 && elapsed < 60000) {
+      if (completedThisMinute >= 500 && elapsed < 60000) {
+        console.log(`Worker ${workerId} waiting for rate limit`)
         await new Promise(r => setTimeout(r, 60000 - elapsed))
         completedThisMinute = 0
         lastMinuteReset = Date.now()
@@ -247,12 +274,16 @@ export async function startScanner() {
       const key = `${owner}/${repo}`
       inProgress.add(key)
       
+      console.log(`Worker ${workerId} scanning ${key}`)
+      
       state.queueSize = scanQueue.length
       state.scanningRepos = Array.from(inProgress)
       state.currentRepo = state.scanningRepos[0] || null
       emit('status', state)
       
       const result = await scanRepo(owner, repo)
+      
+      console.log(`Worker ${workerId} done ${key}: ${result.findings.length} findings, ${result.filesScanned} files`)
       
       inProgress.delete(key)
       state.scanningRepos = Array.from(inProgress)
@@ -261,6 +292,7 @@ export async function startScanner() {
       if (!result.error || result.error !== 'Already scanned') {
         completedThisMinute++
         state.reposPerMinute = completedThisMinute
+        state.totalScanned++
       }
       
       state.totalFound += result.findings.length
@@ -270,6 +302,7 @@ export async function startScanner() {
         emit('finding', result)
       }
     }
+    console.log(`Worker ${workerId} stopped`)
   }
   
   Promise.all(Array(CONCURRENT_SCANS).fill(0).map((_, i) => scanWorker(i)))
@@ -307,6 +340,7 @@ export async function startDiscovery() {
     while (discoveryRunning && scannerRunning) {
       try {
         if (scanQueue.length >= MAX_QUEUE_SIZE) {
+          console.log(`Queue full (${scanQueue.length}), waiting...`)
           await new Promise(r => setTimeout(r, 10000))
           continue
         }
@@ -317,11 +351,15 @@ export async function startDiscovery() {
         const events = await fetchGHArchiveEvents(lastProcessedHour)
         const repos = extractReposFromEvents(events)
         
-        console.log(`Found ${repos.length} repos from ${events.length} events`)
+        console.log(`Found ${repos.length} repos from ${events.length} events, queue: ${scanQueue.length}`)
         
+        let added = 0
         for (const { owner, repo } of repos) {
-          await addToQueue(owner, repo)
+          if (await addToQueue(owner, repo)) {
+            added++
+          }
         }
+        console.log(`Added ${added} new repos to queue`)
         
         lastProcessedHour = new Date(lastProcessedHour.getTime() + 60 * 60 * 1000)
         

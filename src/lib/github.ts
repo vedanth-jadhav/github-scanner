@@ -193,7 +193,7 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
           if (!line.trim()) continue
           lineCount++
           
-          if (lineCount > 5000) {
+          if (lineCount > 20000) {
             destroyed = true
             res.destroy()
             gunzip.destroy()
@@ -213,7 +213,7 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
             }
           } catch {}
           
-          if (events.length >= 500) {
+          if (events.length >= 1000) {
             destroyed = true
             res.destroy()
             gunzip.destroy()
