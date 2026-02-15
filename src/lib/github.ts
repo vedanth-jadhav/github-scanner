@@ -31,8 +31,17 @@ interface TokenInfo {
 
 class TokenPool {
   private tokens: TokenInfo[] = []
+  private initialized = false
+  private initPromise: Promise<void> | null = null
   
   async initialize() {
+    if (this.initPromise) return this.initPromise
+    
+    this.initPromise = this.doInitialize()
+    return this.initPromise
+  }
+  
+  private async doInitialize() {
     const storedTokens = await db.token.findMany({
       where: { active: true },
       orderBy: { usage: 'asc' },
@@ -41,7 +50,7 @@ class TokenPool {
     if (storedTokens.length === 0) {
       const envTokens = process.env.GITHUB_TOKENS?.split(',').map(t => t.trim()).filter(Boolean) || []
       for (const token of envTokens) {
-        await this.addToken(token)
+        await this.addTokenToDb(token)
       }
     } else {
       this.tokens = storedTokens.map(t => ({
@@ -52,9 +61,11 @@ class TokenPool {
         resetAt: 0,
       }))
     }
+    
+    this.initialized = true
   }
   
-  async addToken(token: string, name?: string) {
+  private async addTokenToDb(token: string, name?: string): Promise<boolean> {
     try {
       const res = await fetch('https://api.github.com/user', {
         headers: { Authorization: `Bearer ${token}` },
@@ -79,6 +90,11 @@ class TokenPool {
     } catch {
       return false
     }
+  }
+  
+  async addToken(token: string, name?: string) {
+    if (!this.initialized) await this.initialize()
+    return this.addTokenToDb(token, name)
   }
   
   getToken(): string | null {
@@ -113,7 +129,12 @@ class TokenPool {
     }
   }
   
-  getStatus() {
+  async getStatus() {
+    if (!this.initialized && !this.initPromise) {
+      this.initialize().catch(() => {})
+    }
+    if (this.initPromise) await this.initPromise
+    
     return {
       total: this.tokens.length,
       available: this.tokens.filter(t => !t.rateLimited || t.resetAt < Date.now()).length,
@@ -124,6 +145,8 @@ class TokenPool {
 
 export const tokenPool = new TokenPool()
 
+tokenPool.initialize().catch(() => {})
+
 // ============ GH ARCHIVE ============
 
 // Get events from GH Archive for a specific hour
@@ -131,7 +154,7 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
   const year = date.getUTCFullYear()
   const month = String(date.getUTCMonth() + 1).padStart(2, '0')
   const day = String(date.getUTCDate()).padStart(2, '0')
-  const hour = String(date.getUTCHours()).padStart(2, '0')
+  const hour = date.getUTCHours()
   
   const url = `https://data.gharchive.org/${year}-${month}-${day}-${hour}.json.gz`
   

@@ -6,42 +6,24 @@ A security research tool that scans public GitHub repositories for exposed API k
 
 - **GH Archive Integration**: Uses free GH Archive data - no GitHub API rate limits for discovery
 - **Multi-provider detection**: OpenAI, Anthropic, Gemini, Groq, Cerebras, OpenRouter, Grok
-- **High-speed scanning**: 8 parallel workers, unlimited repos
+- **High-speed scanning**: 8 parallel workers, 30+ repos/minute
 - **Smart filtering**: Aho-Corasick preflight, entropy validation, banlist filtering
 - **Persistent tracking**: Never scans the same repo twice
 - **Disclosure helper**: Generate issue templates to notify repo owners
 - **Dark brutalist UI**: Data-first design, no bloat
 
-## Deploy to Vercel (Free, 5 minutes)
+## Deploy to Railway
 
-### Step 1: Create Turso Database (Free)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template)
 
-1. Go to **https://turso.tech** → Sign in with GitHub
-2. Click **Create Database** → Name: `github-scanner`
-3. Copy the **Database URL**
-4. Go to **Settings** → **API Tokens** → Create token
+1. **Create project**: Go to https://railway.app → New Project
+2. **Add PostgreSQL**: Click + Add Service → Database → PostgreSQL
+3. **Deploy app**: Click + Add Service → GitHub Repo → Select this repo
+4. **Set env var**: In your app service → Variables → Add:
+   - `GITHUB_TOKENS` = `ghp_xxx,ghp_yyy` (comma-separated PATs)
+5. **Connect database**: Variables → Add Reference → Select `DATABASE_URL` from PostgreSQL
 
-### Step 2: Deploy to Vercel
-
-1. Go to **https://vercel.com/new**
-2. Import your fork of this repo
-3. Add Environment Variables:
-
-| Name | Value |
-|------|-------|
-| `TURSO_DATABASE_URL` | `libsql://your-db.turso.io` |
-| `TURSO_AUTH_TOKEN` | `eyJhbGciOiJ...` |
-| `GITHUB_TOKENS` | `ghp_your_token_here` (optional, for file scanning) |
-
-4. Click **Deploy**
-
-### Step 3: Initialize Database
-
-Visit: `https://your-app.vercel.app/api/setup`
-
-This auto-creates all required tables.
-
-**Done!**
+Railway auto-provides `DATABASE_URL` from PostgreSQL. Prisma handles migrations on build.
 
 ## How It Works
 
@@ -76,24 +58,33 @@ GH Archive → Extract repos → Queue → 8 parallel scanners → Findings
 4. **Banlist filtering**: Skip placeholders, test keys
 5. **Deduplication**: SHA-256 hash check
 
-## Free Tier Limits
+## Provider Patterns
 
-| Service | Free Limit |
-|---------|------------|
-| **GH Archive** | Unlimited |
-| **Vercel** | 100GB bandwidth, 6000 min/month |
-| **Turso** | 9GB storage, unlimited reads |
-| **GitHub API** | 5,000 req/hr per token (optional) |
+| Provider | Pattern |
+|----------|---------|
+| OpenAI | `sk-proj-*` or `sk-*` (48+ chars) |
+| Anthropic | `sk-ant-api03-*` |
+| Gemini | `AIza*` |
+| Groq | `gsk_*` |
+| Cerebras | `csk-*` |
+| OpenRouter | `sk-or-*` |
+| Grok | `xai-*` |
 
 ## Local Development
 
 ```bash
 npm install
-npx prisma generate  
 npm run dev
 ```
 
 Open http://localhost:3000
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Auto | PostgreSQL URL (auto-provided by Railway) |
+| `GITHUB_TOKENS` | Optional | Comma-separated GitHub PATs for API rate limits |
 
 ## Responsible Disclosure
 

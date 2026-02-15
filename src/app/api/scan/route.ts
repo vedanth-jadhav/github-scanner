@@ -11,7 +11,7 @@ import { tokenPool } from '@/lib/github'
 
 export async function GET() {
   const state = getState()
-  const tokenStatus = tokenPool.getStatus()
+  const tokenStatus = await tokenPool.getStatus()
   
   return NextResponse.json({
     ...state,

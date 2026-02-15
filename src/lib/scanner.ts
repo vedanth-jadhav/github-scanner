@@ -290,14 +290,22 @@ export async function startDiscovery() {
   if (discoveryRunning) return
   discoveryRunning = true
   
-  // Start from 2 hours ago (gives GH Archive time to publish)
-  lastProcessedHour = new Date()
-  lastProcessedHour.setHours(lastProcessedHour.getHours() - 2, 0, 0, 0)
+  const now = new Date()
+  lastProcessedHour = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    now.getUTCHours() - 3,
+    0,
+    0,
+    0
+  ))
   
   const discover = async () => {
     while (discoveryRunning && scannerRunning) {
       try {
-        console.log(`Fetching GH Archive for ${lastProcessedHour.toISOString()}`)
+        const hourStr = lastProcessedHour.toISOString().slice(0, 13) + ':00:00.000Z'
+        console.log(`Fetching GH Archive for ${hourStr}`)
         
         const events = await fetchGHArchiveEvents(lastProcessedHour)
         const repos = extractReposFromEvents(events)
@@ -308,15 +316,12 @@ export async function startDiscovery() {
           await addToQueue(owner, repo)
         }
         
-        // Move to next hour
         lastProcessedHour = new Date(lastProcessedHour.getTime() + 60 * 60 * 1000)
         
-        // If we caught up to current time, wait
-        const now = new Date()
-        const catchUpTime = new Date(now.getTime() - 2 * 60 * 60 * 1000) // 2 hours ago
+        const catchUpTime = new Date(Date.now() - 3 * 60 * 60 * 1000)
         
         if (lastProcessedHour >= catchUpTime) {
-          await new Promise(r => setTimeout(r, 60 * 60 * 1000)) // Wait 1 hour
+          await new Promise(r => setTimeout(r, 60 * 60 * 1000))
         }
       } catch (error) {
         console.error('Discovery error:', error)
