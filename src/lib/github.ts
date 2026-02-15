@@ -1,8 +1,7 @@
 import { db } from './db'
 import { createGunzip } from 'node:zlib'
-import { pipeline } from 'node:stream/promises'
-import { Readable } from 'node:stream'
-import { setTimeout as sleep } from 'node:timers/promises'
+import { get as httpGet } from 'node:http'
+import { get as httpsGet } from 'node:https'
 
 // GH Archive - Free, no rate limits
 // https://data.gharchive.org/{YYYY-MM-DD-H}.json.gz
@@ -162,56 +161,49 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
   
   const url = `https://data.gharchive.org/${year}-${month}-${day}-${hour}.json.gz`
   
-  console.log(`Fetching GH Archive for ${date.toISOString()}`)
+  console.log(`Fetching GH Archive: ${url}`)
   
-  try {
-    const res = await fetch(url)
-    if (!res.ok) {
-      console.error(`GH Archive fetch failed: ${res.status}`)
-      return []
-    }
-    
+  return new Promise((resolve) => {
     const events: GHArchiveEvent[] = []
-    const gunzip = createGunzip()
+    let buffer = ''
+    let lineCount = 0
+    let destroyed = false
     
-    const nodeStream = Readable.fromWeb(res.body as any)
+    const get = url.startsWith('https') ? httpsGet : httpGet
     
-    await pipeline(
-      nodeStream,
-      gunzip,
-      async function* (source) {
-        let buffer = ''
+    get(url, (res) => {
+      if (res.statusCode !== 200) {
+        console.error(`GH Archive fetch failed: ${res.statusCode}`)
+        resolve([])
+        return
+      }
+      
+      const gunzip = createGunzip()
+      
+      res.pipe(gunzip)
+      
+      gunzip.on('data', (chunk: Buffer) => {
+        if (destroyed) return
         
-        for await (const chunk of source) {
-          buffer += chunk.toString()
+        buffer += chunk.toString()
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        
+        for (const line of lines) {
+          if (!line.trim()) continue
+          lineCount++
           
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-          
-          for (const line of lines) {
-            if (!line.trim()) continue
-            try {
-              const event = JSON.parse(line)
-              if (
-                event.type === 'CreateEvent' ||
-                event.type === 'PushEvent' ||
-                event.type === 'PublicEvent'
-              ) {
-                events.push(event)
-              }
-            } catch {}
+          if (lineCount > 5000) {
+            destroyed = true
+            res.destroy()
+            gunzip.destroy()
+            console.log(`Got ${events.length} relevant events from ~${lineCount} lines`)
+            resolve(events)
+            return
           }
           
-          if (events.length > 500) {
-            break
-          }
-          
-          await sleep(0)
-        }
-        
-        if (buffer.trim()) {
           try {
-            const event = JSON.parse(buffer)
+            const event = JSON.parse(line)
             if (
               event.type === 'CreateEvent' ||
               event.type === 'PushEvent' ||
@@ -220,16 +212,32 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
               events.push(event)
             }
           } catch {}
+          
+          if (events.length >= 500) {
+            destroyed = true
+            res.destroy()
+            gunzip.destroy()
+            console.log(`Got ${events.length} relevant events from ~${lineCount} lines`)
+            resolve(events)
+            return
+          }
         }
-      }
-    )
-    
-    console.log(`Got ${events.length} relevant events from GH Archive`)
-    return events
-  } catch (error) {
-    console.error('GH Archive error:', error)
-    return []
-  }
+      })
+      
+      gunzip.on('end', () => {
+        console.log(`Got ${events.length} relevant events from ~${lineCount} lines`)
+        resolve(events)
+      })
+      
+      gunzip.on('error', (err: Error) => {
+        console.error('Gunzip error:', err)
+        resolve(events)
+      })
+    }).on('error', (err: Error) => {
+      console.error('HTTP error:', err)
+      resolve([])
+    })
+  })
 }
 
 // Extract new repos from GH Archive events - dedupe on the fly
