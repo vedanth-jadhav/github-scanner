@@ -5,6 +5,7 @@ import { ScannerStatus, TokenStatus } from '@/types'
 
 interface ScannerState extends ScannerStatus {
   scanningRepos?: string[]
+  totalScanned: number
 }
 
 interface UseScannerStatusResult {
@@ -20,6 +21,7 @@ export function useScannerStatus(): UseScannerStatusResult {
     reposPerMinute: 0,
     queueSize: 0,
     totalFound: 0,
+    totalScanned: 0,
     currentRepo: null,
     scanningRepos: [],
   })
@@ -41,6 +43,7 @@ export function useScannerStatus(): UseScannerStatusResult {
         reposPerMinute: data.reposPerMinute,
         queueSize: data.queueSize,
         totalFound: data.totalFound,
+        totalScanned: data.totalScanned || 0,
         currentRepo: data.currentRepo,
         scanningRepos: data.scanningRepos || (data.currentRepo ? [data.currentRepo] : []),
       })
