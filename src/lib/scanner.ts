@@ -1,6 +1,6 @@
 import { db } from './db'
 import { detectKeys, SCAN_EXTENSIONS, SKIP_FILE_PATTERNS, type Detection } from './detectors'
-import { getRepoContents, getFileContent, getPublicEvents } from './github'
+import { getRepoContents, getFileContent, fetchGHArchiveEvents, extractReposFromEvents } from './github'
 
 export interface ScanResult {
   owner: string
@@ -156,14 +156,14 @@ export async function scanRepo(owner: string, repoName: string): Promise<ScanRes
   }
 }
 
-// Scanner state with tracking for multiple repos
+// Scanner state
 export interface ScannerState {
   running: boolean
   reposPerMinute: number
   queueSize: number
   totalFound: number
   currentRepo: string | null
-  scanningRepos: string[]  // All repos currently being scanned
+  scanningRepos: string[]
 }
 
 const state: ScannerState = {
@@ -245,7 +245,6 @@ export async function startScanner() {
       const key = `${owner}/${repo}`
       inProgress.add(key)
       
-      // Add to scanning repos list
       state.queueSize = scanQueue.length
       state.scanningRepos = Array.from(inProgress)
       state.currentRepo = state.scanningRepos[0] || null
@@ -254,8 +253,6 @@ export async function startScanner() {
       const result = await scanRepo(owner, repo)
       
       inProgress.delete(key)
-      
-      // Remove from scanning repos list
       state.scanningRepos = Array.from(inProgress)
       state.currentRepo = state.scanningRepos[0] || null
       
@@ -284,40 +281,53 @@ export function stopScanner() {
   emit('status', state)
 }
 
-// Discovery
-let discoveryLoop: ReturnType<typeof setTimeout> | null = null
-let lastEtag: string | undefined = undefined
+// ============ GH ARCHIVE DISCOVERY ============
+
+let discoveryRunning = false
+let lastProcessedHour = new Date()
 
 export async function startDiscovery() {
-  const poll = async () => {
-    if (!scannerRunning) return
-    
-    const { events, newEtag, pollInterval } = await getPublicEvents(lastEtag)
-    
-    if (newEtag) {
-      lastEtag = newEtag
-      
-      for (const event of events) {
-        if (event.type === 'CreateEvent' || event.type === 'PushEvent' || event.type === 'PublicEvent') {
-          const [owner, repo] = event.repo.name.split('/')
-          if (owner && repo) {
-            await addToQueue(owner, repo)
-          }
+  if (discoveryRunning) return
+  discoveryRunning = true
+  
+  // Start from 2 hours ago (gives GH Archive time to publish)
+  lastProcessedHour = new Date()
+  lastProcessedHour.setHours(lastProcessedHour.getHours() - 2, 0, 0, 0)
+  
+  const discover = async () => {
+    while (discoveryRunning && scannerRunning) {
+      try {
+        console.log(`Fetching GH Archive for ${lastProcessedHour.toISOString()}`)
+        
+        const events = await fetchGHArchiveEvents(lastProcessedHour)
+        const repos = extractReposFromEvents(events)
+        
+        console.log(`Found ${repos.length} repos from ${events.length} events`)
+        
+        for (const { owner, repo } of repos) {
+          await addToQueue(owner, repo)
         }
+        
+        // Move to next hour
+        lastProcessedHour = new Date(lastProcessedHour.getTime() + 60 * 60 * 1000)
+        
+        // If we caught up to current time, wait
+        const now = new Date()
+        const catchUpTime = new Date(now.getTime() - 2 * 60 * 60 * 1000) // 2 hours ago
+        
+        if (lastProcessedHour >= catchUpTime) {
+          await new Promise(r => setTimeout(r, 60 * 60 * 1000)) // Wait 1 hour
+        }
+      } catch (error) {
+        console.error('Discovery error:', error)
+        await new Promise(r => setTimeout(r, 60000))
       }
-    }
-    
-    if (scannerRunning) {
-      discoveryLoop = setTimeout(poll, Math.max(pollInterval * 1000, 30000))
     }
   }
   
-  poll()
+  discover()
 }
 
 export function stopDiscovery() {
-  if (discoveryLoop) {
-    clearTimeout(discoveryLoop)
-    discoveryLoop = null
-  }
+  discoveryRunning = false
 }
