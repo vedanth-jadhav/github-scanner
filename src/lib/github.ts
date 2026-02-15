@@ -202,7 +202,7 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
             } catch {}
           }
           
-          if (events.length > 10000) {
+          if (events.length > 500) {
             break
           }
           
