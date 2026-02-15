@@ -34,8 +34,8 @@ async function markScanned(owner: string, repo: string, findings: number): Promi
 async function getFilesParallel(
   owner: string, 
   repo: string,
-  maxFiles: number = 50,
-  concurrency: number = 20
+  maxFiles: number = 20,
+  concurrency: number = 5
 ): Promise<Array<{ path: string; content: string }>> {
   const allFiles: Array<{ path: string; url: string }> = []
   const queue: string[] = ['']
@@ -105,7 +105,7 @@ export async function scanRepo(owner: string, repoName: string): Promise<ScanRes
       }
     }
     
-    const files = await getFilesParallel(owner, repoName, 50, 20)
+    const files = await getFilesParallel(owner, repoName, 20, 5)
     
     if (files.length === 0) {
       await markScanned(owner, repoName, 0)
@@ -238,7 +238,7 @@ export function getState(): ScannerState {
 
 // PARALLEL SCANNER
 let scannerRunning = false
-const CONCURRENT_SCANS = 16
+const CONCURRENT_SCANS = 4
 
 export async function startScanner() {
   if (scannerRunning) return
