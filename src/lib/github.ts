@@ -1,4 +1,8 @@
 import { db } from './db'
+import { createGunzip } from 'node:zlib'
+import { pipeline } from 'node:stream/promises'
+import { Readable } from 'node:stream'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 // GH Archive - Free, no rate limits
 // https://data.gharchive.org/{YYYY-MM-DD-H}.json.gz
@@ -7,7 +11,7 @@ interface GHArchiveEvent {
   type: string
   repo: {
     id: number
-    name: string  // format: "owner/repo"
+    name: string
     url: string
   }
   actor: {
@@ -149,7 +153,7 @@ tokenPool.initialize().catch(() => {})
 
 // ============ GH ARCHIVE ============
 
-// Get events from GH Archive for a specific hour
+// Get events from GH Archive for a specific hour using streaming
 export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]> {
   const year = date.getUTCFullYear()
   const month = String(date.getUTCMonth() + 1).padStart(2, '0')
@@ -158,6 +162,8 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
   
   const url = `https://data.gharchive.org/${year}-${month}-${day}-${hour}.json.gz`
   
+  console.log(`Fetching GH Archive for ${date.toISOString()}`)
+  
   try {
     const res = await fetch(url)
     if (!res.ok) {
@@ -165,20 +171,60 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
       return []
     }
     
-    const buffer = await res.arrayBuffer()
-    const decompressed = await decompressGzip(new Uint8Array(buffer))
-    
-    // Each line is a JSON event
-    const lines = decompressed.split('\n').filter(Boolean)
     const events: GHArchiveEvent[] = []
+    const gunzip = createGunzip()
     
-    for (const line of lines) {
-      try {
-        const event = JSON.parse(line)
-        events.push(event)
-      } catch {}
-    }
+    const nodeStream = Readable.fromWeb(res.body as any)
     
+    await pipeline(
+      nodeStream,
+      gunzip,
+      async function* (source) {
+        let buffer = ''
+        
+        for await (const chunk of source) {
+          buffer += chunk.toString()
+          
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              const event = JSON.parse(line)
+              if (
+                event.type === 'CreateEvent' ||
+                event.type === 'PushEvent' ||
+                event.type === 'PublicEvent'
+              ) {
+                events.push(event)
+              }
+            } catch {}
+          }
+          
+          if (events.length > 50000) {
+            break
+          }
+          
+          await sleep(0)
+        }
+        
+        if (buffer.trim()) {
+          try {
+            const event = JSON.parse(buffer)
+            if (
+              event.type === 'CreateEvent' ||
+              event.type === 'PushEvent' ||
+              event.type === 'PublicEvent'
+            ) {
+              events.push(event)
+            }
+          } catch {}
+        }
+      }
+    )
+    
+    console.log(`Got ${events.length} relevant events from GH Archive`)
     return events
   } catch (error) {
     console.error('GH Archive error:', error)
@@ -186,62 +232,22 @@ export async function fetchGHArchiveEvents(date: Date): Promise<GHArchiveEvent[]
   }
 }
 
-// Decompress gzip using Web Streams API (works in modern runtimes)
-async function decompressGzip(data: Uint8Array): Promise<string> {
-  try {
-    const ds = new DecompressionStream('gzip')
-    const writer = ds.writable.getWriter()
-    
-    writer.write(data)
-    writer.close()
-    
-    const reader = ds.readable.getReader()
-    const chunks: Uint8Array[] = []
-    
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      chunks.push(value)
-    }
-    
-    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
-    const result = new Uint8Array(totalLength)
-    let offset = 0
-    for (const chunk of chunks) {
-      result.set(chunk, offset)
-      offset += chunk.length
-    }
-    
-    return new TextDecoder().decode(result)
-  } catch (error) {
-    console.error('Decompression error:', error)
-    return ''
-  }
-}
-
-// Extract new repos from GH Archive events
+// Extract new repos from GH Archive events - dedupe on the fly
 export function extractReposFromEvents(events: GHArchiveEvent[]): Array<{ owner: string; repo: string }> {
-  const repos = new Set<string>()
+  const seen = new Set<string>()
+  const result: Array<{ owner: string; repo: string }> = []
   
   for (const event of events) {
-    // CreateEvent: new repo created
-    // PushEvent: code pushed to repo
-    // PublicEvent: repo made public
-    if (
-      event.type === 'CreateEvent' ||
-      event.type === 'PushEvent' ||
-      event.type === 'PublicEvent'
-    ) {
-      if (event.repo?.name) {
-        repos.add(event.repo.name)
+    if (event.repo?.name && !seen.has(event.repo.name)) {
+      seen.add(event.repo.name)
+      const [owner, repo] = event.repo.name.split('/')
+      if (owner && repo) {
+        result.push({ owner, repo })
       }
     }
   }
   
-  return Array.from(repos).map(fullName => {
-    const [owner, repo] = fullName.split('/')
-    return { owner, repo }
-  }).filter(r => r.owner && r.repo)
+  return result
 }
 
 // ============ GITHUB API (for scanning files) ============
